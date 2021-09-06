@@ -24,7 +24,7 @@ import io.netty.util.collection.IntObjectMap;
 import io.netty.util.collection.IntObjectMap.PrimitiveEntry;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
-import io.netty.util.concurrent.UnaryPromiseNotifier;
+import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.internal.EmptyArrays;
 import io.netty.util.internal.UnstableApi;
 import io.netty.util.internal.logging.InternalLogger;
@@ -128,7 +128,7 @@ public class DefaultHttp2Connection implements Http2Connection {
             } else if (promise instanceof ChannelPromise && ((ChannelFuture) closePromise).isVoid()) {
                 closePromise = promise;
             } else {
-                closePromise.addListener(new UnaryPromiseNotifier<Void>(promise));
+                PromiseNotifier.cascade(closePromise, promise);
             }
         } else {
             closePromise = promise;
@@ -483,8 +483,10 @@ public class DefaultHttp2Connection implements Http2Connection {
         @Override
         public Http2Stream open(boolean halfClosed) throws Http2Exception {
             state = activeState(id, state, isLocal(), halfClosed);
-            if (!createdBy().canOpenStream()) {
-                throw connectionError(PROTOCOL_ERROR, "Maximum active streams violated for this endpoint.");
+            final DefaultEndpoint<? extends Http2FlowController> endpoint = createdBy();
+            if (!endpoint.canOpenStream()) {
+                throw connectionError(PROTOCOL_ERROR, "Maximum active streams violated for this endpoint: " +
+                        endpoint.maxActiveStreams());
             }
 
             activate();
@@ -897,7 +899,8 @@ public class DefaultHttp2Connection implements Http2Connection {
             }
             boolean isReserved = state == RESERVED_LOCAL || state == RESERVED_REMOTE;
             if (!isReserved && !canOpenStream() || isReserved && numStreams >= maxStreams) {
-                throw streamError(streamId, REFUSED_STREAM, "Maximum active streams violated for this endpoint.");
+                throw streamError(streamId, REFUSED_STREAM, "Maximum active streams violated for this endpoint: " +
+                        (isReserved ? maxStreams : maxActiveStreams));
             }
             if (isClosed()) {
                 throw connectionError(INTERNAL_ERROR, "Attempted to create stream id %d after connection was closed",
